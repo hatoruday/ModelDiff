@@ -48,12 +48,17 @@ class ModelDiff(ModelComparison):
         self.input_shape = model1.input_shape
         if list(model1.input_shape) != list(model2.input_shape):
             self.logger.warning('input shapes do not match')
+            #gen_inputs를 설정해주지 않으면 gen_profiling_inputs_search을 사용
         self.gen_inputs = gen_inputs if gen_inputs else ModelDiff._gen_profiling_inputs_search
+        #논문의 4.2절에서 설명한 입력 메트릭 계산 방법을 지정.
         self.input_metrics = input_metrics if input_metrics else ModelDiff.metrics_output_diversity
+        # 논문의 4.3절에서 설명한 결정 거리 계산 방법을 지정.
         self.compute_decision_dist = compute_decision_dist if compute_decision_dist else ModelDiff._compute_decision_dist_output_cos
+        #논문의 4.3절에서 설명한 DDV 비교 방법을 지정.
         self.compare_ddv = compare_ddv if compare_ddv else ModelDiff._compare_ddv_cos
 
     def get_seed_inputs(self, rand=False):
+        #논문의 4.2절에서 언급한 시드 입력 생성. -> model1과 model2의 입력을 
         seed_inputs = np.concatenate([
             self.model1.get_seed_inputs(self.N_INPUT_PAIRS, rand=rand),
             self.model2.get_seed_inputs(self.N_INPUT_PAIRS, rand=rand)
@@ -62,6 +67,7 @@ class ModelDiff(ModelComparison):
         return seed_inputs
         
     def compare(self, use_torch=True):
+        # 논문의 4.1절에서 설명한 ModelDiff의 전체 파이프라인 구현
         self.logger.info(f'generating seed inputs')
         seed_inputs = list(self.get_seed_inputs())
         np.random.shuffle(seed_inputs)
@@ -69,7 +75,8 @@ class ModelDiff(ModelComparison):
         if use_torch:
             seed_inputs = torch.from_numpy(seed_inputs)
         self.logger.info(f'  seed inputs generated with shape {seed_inputs.shape}')
-
+        
+        # 논문의 4.2절에서 설명한 테스트 입력 생성
         self.logger.info(f'generating profiling inputs')
         profiling_inputs = self.gen_inputs(self, seed_inputs, use_torch=use_torch)
         # input_pairs = []
@@ -81,6 +88,8 @@ class ModelDiff(ModelComparison):
         #     input_pairs.append((xa, xb))
         self.logger.info(f'  profiling inputs generated with shape {profiling_inputs.shape}')
 
+
+        #논문의 4.2절에서 설명한 입력 메트릭 계산
         self.logger.info(f'computing metrics')
         input_metrics_1 = self.input_metrics(self.model1, profiling_inputs, use_torch=use_torch)
         input_metrics_2 = self.input_metrics(self.model2, profiling_inputs, use_torch=use_torch)
@@ -353,12 +362,13 @@ class ModelDiff(ModelComparison):
         return np.array(dists)
 
     def compute_similarity_with_ddm(self, profiling_inputs):
+        #논문의 4.3절에서 설명한 DDM(Decision Distance Matrix) 계산
         self.logger.info(f'computing DDMs')
         ddm1 = self.compute_ddm(self.model1, profiling_inputs)
         ddm2 = self.compute_ddm(self.model2, profiling_inputs)
         self.logger.info(f'  DDM computed: shape={ddm1.shape} and {ddm2.shape}')
 #         print(f' ddv1={ddv1}\n ddv2={ddv2}')
-
+        # 논문의 4.3절에서 설명한 모델 유사도 측정
         self.logger.info(f'measuring model similarity')
         ddm_distance = ModelDiff.mtx_similar1(ddm1, ddm2)
         model_similarity = 1 - ddm_distance
@@ -367,6 +377,7 @@ class ModelDiff(ModelComparison):
         return model_similarity
     
     def compute_ddm(self, model, inputs):
+        #논문의 4.3절에서 설명한 DDM(Decision Distance Matrix) 계산
         outputs = model.batch_forward(inputs).to('cpu').numpy()
         # outputs = outputs[:, :10]
         outputs_list = list(outputs)
@@ -375,6 +386,7 @@ class ModelDiff(ModelComparison):
     
     @staticmethod
     def metrics_output_diversity(model, inputs, use_torch=False):
+        # 논문의 4.2절에서 설명한 출력 다양성 메트릭 계산
         outputs = model.batch_forward(inputs).to('cpu').numpy()
 #         output_dists = []
 #         for i in range(0, len(outputs) - 1):
@@ -382,7 +394,10 @@ class ModelDiff(ModelComparison):
 #                 output_dist = spatial.distance.euclidean(outputs[i], outputs[j])
 #                 output_dists.append(output_dist)
 #         diversity = sum(output_dists) / len(output_dists)
+        # cdist 함수는 두 집합 모든 쌍 사이의 거리를 유클리드 거리를 이용해서 계산함.
+        #outputs_dists는 모든 출력 쌍 사이의 거리를 담은 행렬.
         output_dists = spatial.distance.cdist(list(outputs), list(outputs), p=2.0)
+        #계산된 모든 거리의 평균을 구함.
         diversity = np.mean(output_dists)
         return diversity
 
